@@ -1,0 +1,13 @@
+﻿{
+    "outputs":  [
+                    {
+                        "sha256":  "71E828F70D2A8C3D8CC6589F50988A629B2FFC3EE33C278D7A4B48A6E38EE0EC",
+                        "source":  "WifiBios21_MB_EL.cod",
+                        "file":  "WifiBios21_MB_EL.bin"
+                    }
+                ],
+    "directory":  ".",
+    "targets":  [
+                    "WifiBios21_MB_EL"
+                ]
+}

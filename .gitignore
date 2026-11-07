@@ -1,0 +1,7 @@
+# Generated listings, symbols and local logs (binaries are intentionally tracked)
+*.lst
+*.sym
+*.log
+Thumbs.db
+.DS_Store
+.vs/

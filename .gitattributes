@@ -1,0 +1,4 @@
+# Preserve tested file bytes on Windows and Unix checkouts.
+* -text
+*.bin binary
+*.cod binary

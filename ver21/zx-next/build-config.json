@@ -1,0 +1,13 @@
+﻿{
+    "outputs":  [
+                    {
+                        "sha256":  "CB2B2937AF2B6BA573615E8246F5A941B9D7274FC7305D5149F05D51FDFDEA43",
+                        "source":  "WifiBios21_NX.cod",
+                        "file":  "WifiBios21_NX.bin"
+                    }
+                ],
+    "directory":  ".",
+    "targets":  [
+                    "WifiBios21_NX"
+                ]
+}
