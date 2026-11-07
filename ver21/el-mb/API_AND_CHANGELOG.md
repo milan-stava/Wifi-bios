@@ -1,56 +1,35 @@
-# WiFi BIOS 2.1 – MB03+ / eLeMeNt ZX
+# WiFi BIOS 2.1 - MB03+ / eLeMeNt ZX
 
-Opravená samostatná varianta původního BIOSu 2.0. Není to zatím port
-pro ZX Next. Původní zdroje 2.0 a BIOS používaný setupem 1.8 nebyly změněny.
+This release fixes the original 2.0 driver without changing the public entry-table layout. The original 2.0 files remain in the historical archive.
 
-## Velikost
+## Size
 
-| Část | 2.0 | 2.1 | Rozdíl |
+| Part | 2.0 | 2.1 | Change |
 |---|---:|---:|---:|
-| Celá distribuovaná binárka | 544 B | 566 B | +22 B |
-| Trvalá část (bios_len) | 469 B | 489 B | +20 B |
-| Instalační/relokační část | 75 B | 77 B | +2 B |
+| Distributed binary | 544 B | 566 B | +22 B |
+| Resident part, bios_len | 469 B | 489 B | +20 B |
+| Installation/relocation | 75 B | 77 B | +2 B |
 
-Rozpis změn: kontrola sentinelové rychlosti +2 B, oba prázdné bloky +8 B,
-stavové carry vysílače +2 B, zachování A beze změny velikosti, ochrana
-MB power portů při eLeMeNtu včetně relokace +14 B, odstranění dvou
-skokových mezistupňů -4 B. Celkem +22 B.
+Changes: baud-table sentinel check +2 B; empty-block handling +8 B; TX status carry +2 B; preserving A costs no extra bytes; MB power-port protection on eLeMeNt, including relocation, +14 B; removing two intermediate jumps saves 4 B.
 
-## Opravy a smlouva rozhraní
+## Interface and fixes
 
-- Verze vracená v BC je 0201; vstupní tabulka +00..+22 zůstává stejná.
-- Neplatná načtená rychlost FF vrací chybu: CY=1, A=FF, BC=E=0.
-- send_byte při dotazu NC vrací carry podle obsazení TX. A je zachováno
-  jak při úspěšném odeslání, tak při obsazeném vysílači a stavovém dotazu.
-- BC=0 znamená prázdný blok, ne 65536 B. Obě blokové služby ihned vracejí
-  CY=1, bez přenosu, změny HL/DE, přístupu k UARTu nebo změny DE'.
-- wifi_on/off na detekovaném eLeMeNtu nepřistupují k MB power portům.
-  wifi_on vrací NZ (modul stále zapnutý); wifi_off Z (nelze vypnout).
-- Zapnutí/vypnutí MB nadále mění jen bit 0. Úspěšné vypnutí vrací NZ
-  i pokud celý zapsaný řídicí bajt je 0.
-- Popis registrů, Z/NZ a skutečného čítače send_block je upřesněn také
-  přímo ve zdroji WifiBios21_MB_EL.a80, včetně seznamu změn v hlavičce.
-- Inicializační vstup se stále musí volat před ostatními službami.
+- Version in BC is 0201. Public entries +00 through +22 retain their layout.
+- An invalid hardware baud code returns CY=1, A=FF, and BC:E=0. FF is a table sentinel, not baud index 24.
+- send_byte status queries return carry according to TX availability. A is preserved after successful transmission, a busy transmitter, and a status-only query.
+- BC=0 means an empty block, not 65536 bytes. Both block services immediately return CY=1 without transferring data, changing HL/DE, accessing UART ports, or changing alternate DE.
+- On eLeMeNt, wifi_on/off do not access MB power-control ports. wifi_on returns NZ because the module remains powered; wifi_off returns Z because power-off is unsupported.
+- On MB, power operations change bit 0 only. Successful power-off returns NZ even when the written control byte becomes zero.
+- Register, Z/NZ, and send_block counter contracts are documented in the source header.
+- Call the installation entry before using other services.
 
-## Ověření
+## Verification and integration
 
-SjASMPlus 1.20.3: bez chyb a varování. 129 scénářů sestaveného Z80 kódu
-se simulovanými porty: relokace na 4000/6000/C000/FD00, opakovaná
-inicializace, všech 24 rychlostí a readback, neplatné rychlosti, byte RX/TX,
-256B optimalizace příjmu, timeouty, prázdné bloky, registry a napájení
-pro MB i eLeMeNt. Ověřeno, že původní 2.0 se nezměnil.
-Testy nenahrazují ověření na skutečném MB03+/eLeMeNt hardwaru.
+SjASMPlus 1.20.3 builds the driver without errors or warnings. The test script executes 129 scenarios on assembled Z80 code with simulated ports: relocation at 4000/6000/C000/FD00, repeated installation, all 24 baud indices and readback, invalid rates, byte RX/TX, optimized 256-byte reception, timeouts, empty blocks, registers, and power handling.
 
-Sestavení:
+These tests do not replace real-hardware testing.
 
-    assembly.bat
+Build: assembly.bat.
+Test: powershell -NoProfile -ExecutionPolicy Bypass -File test_bios21.ps1.
 
-Testy:
-
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\test_bios21.ps1
-
-Výstup WifiBios21_MB_EL.cod se zatím automaticky nekopíruje do setupu.
-Pro Next bude použit opravený základ, ale jeho UART backend vyžaduje
-samostatnou úpravu podle Next hardwaru.
-## Integrace 2026-11-05
-Binárka 2.1 byla na výslovnou žádost uživatele vložena do WiFi Setupu 1.8 i Sáry 128. Původní 2.0 zůstává zachovaná. Sestavení samotného BIOSu stále automaticky nepřepisuje kopie v aplikacích.
+The 566-byte driver is integrated into WiFi Setup 1.8 and the separate work-in-progress Sara 128 project. Building this driver does not automatically update those applications.
