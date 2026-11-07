@@ -1,0 +1,765 @@
+# file opened: WifiBios18.a80
+  1   0000              ;; Wifi Bios for ESP 01- eLeMeNtZX
+  2   0000              ;; ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  3   0000              ;; Written by Busy & Hood
+  4   0000              ;; Consultations & acknowldgements & ideas: LMN, Lanex, Shrek, "Uart" authors (from Specnext)
+  5   0000
+  6   0000              ;; differences in Wifi behaviour on EL as opposed to MB03+:
+  7   0000              ;; 1) Wifi module cannot be turned ON or OFF on a port. Turnon the computer= module turnon
+  8   0000              ;; 2) max communication uart speed is always 23 and not lower
+  9   0000
+ 10   0000              ;DONE...	zmenit chovani turnonwifi, vzdy musi vracet NZ
+ 11   0000              ;DONE...	prepsat get_baud
+ 12   0000              ;prepsat ovladaci porty
+ 13   0000
+ 14   0000
+ 15   0000
+ 16   0000
+ 17   0000              ;; ver 1.0 - 14.02.2020 - starting version
+ 18   0000              ;; ver 1.1 - 11.03.2020 - "turnon_wifi" routine updated, now correctly turns on the wifi module
+ 19   0000              ;; ver 1.2 - 30.04.2020 - New port layout and relocations of absolute addresses
+ 20   0000              ;; ver 1.3 - 25.05.2020 - new Wifi speeds added to "set_baud_rate"
+ 21   0000              ;; ver 1.4 - 03.06.2020 - new Wifi speeds added to "set_baud_rate"
+ 22   0000              ;;			- timeout added to "rece_block"
+ 23   0000              ;;			- "set_baud_rate" returns set Uart speed (as described in HW spec)
+ 24   0000              ;;			- "get_version_instal" returns core version
+ 25   0000              ;;			- "wifi_on" routine simplified
+ 26   0000              ;; ver 1.5 -		- release
+ 27   0000              ;; ver 1.6 - 18.3.2021	- "send_block- fix: now running correctly
+ 28   0000              ;;			- "send_block" and "rece_block" changes:
+ 29   0000              ;;					- key test routine removed for higher speed
+ 30   0000              ;;					- reg A status removed on output
+ 31   0000              ;;					- C/NC added on output
+ 32   0000              ;;			- "turnon_wifi": turns wifi on, or returns wifi state (without setting it on)
+ 33   0000              ;; ver 1.7 - 08.04.2021	- "get_version_install": MB03+ FW detection added-> max possible speed returned
+ 34   0000              ;;			- "set_baud_rate": - supported speed info returned with respect to MB03+ FW
+ 35   0000              ;;					   - minor bugfix
+ 36   0000              ;; ver 1.8 - 25.4.2021	- "set_baud_rate": - rewritten
+ 37   0000              ;;			- new routine GET_BAUD
+ 38   0000
+ 39   0000
+ 40   0000              vers	equ	#0108	;; Bios version: high byte = major number, low byte = minor number
+ 41   0000              ;seladd	equ	0	;; Select port addresses: 0=#2X3B, 1=#7X3B
+ 42   0000
+ 43   0000              ;; Used services
+ 44   0000              ;; ~~~~~~~~~~~~~
+ 45   0000              ;; +00 get_version_install: Get info about this bios, core version
+ 46   0000              ;;                          and install bios (in case of non relocatable code)
+ 47   0000              ;;                            INP: nothing
+ 48   0000              ;;                            OUT: HL = text version
+ 49   0000              ;;                                 BC = version number
+ 50   0000              ;;                                 A = max speed supported by MB03+ FW and bios
+ 51   0000              ;;				   DE = core version read out from MB03+
+ 52   0000              ;;				   LX = number of calls (bios routines)
+ 53   0000              ;;
+ 54   0000              ;; +04 turnon_wifi:         Turns Wifi module on
+ 55   0000              ;;				INP: NC = get status only, C = get status+ turn wifi on
+ 56   0000              ;;				OUT: Z= wifi is off, NZ= wifi is on
+ 57   0000              ;;
+ 58   0000              ;;
+ 59   0000              ;; +06 turnoff_wifi:        Turns Wifi module off (no flags)
+ 60   0000              ;;                            INP: nothing
+ 61   0000              ;;                            OUT: nothing
+ 62   0000              ;;
+ 63   0000              ;; +08 set_baud_rate:       Get info about supported communication speeds
+ 64   0000              ;;                          or set selected communication speed
+ 65   0000              ;;                            INP: CY: 0 = get speed info only, 1 = set speed into HW
+ 66   0000              ;;                                 reg A = index of speed 0..23, 0=slowest, 23=fastest
+ 67   0000              ;;                                         Note: Index is not OUT value defined in HW !
+ 68   0000              ;;                            OUT: CY = 1: Error, speed not supported (returns BC:E = 0)
+ 69   0000              ;;                                 CY = 0: OK, BC:E = speed in Bauds, corresponding with input index in A
+ 70   0000              ;;
+ 71   0000              ;; +10 get_baud_rate:      Returns current uart speed
+ 72   0000              ;;                            INP: none
+ 73   0000              ;;                            OUT: CY: 1 = speed reading not supported by FW, BC:E = 0, A = invalid (A=#FF)
+ 74   0000              ;;				   CY: 0 = OK, in this case:
+ 75   0000              ;;				           A = index of current speed as defined in bios index speed (0-23)
+ 76   0000              ;;                                         BC:E = speed in Bauds,corresponding with bios index speed (0-23)
+ 77   0000              ;;
+ 78   0000              ;;                            Encoding Baud speed in registers BC:E for  set_baud_rate and get_baud_rate
+ 79   0000              ;;                                 Speed = BC * 10 ^ E
+ 80   0000              ;;                                 BC = E = 0 if speed not supported
+ 81   0000              ;;                                 Examle: BC=1152,E=2 ... Speed = 1152*10^2 = 115200 Bd
+ 82   0000              ;;
+ 83   0000              ;; +12 clear_receive_buffer: Resets FIFO to empty state
+ 84   0000              ;;                            INP: nothing
+ 85   0000              ;;                            OUT: nothing
+ 86   0000              ;;
+ 87   0000              ;; +16 rece_byte:           Get receive status or receive one byte
+ 88   0000              ;;                            INP: CY: NC = get status only,
+ 89   0000              ;;                                      C = get one byte from FIFO buffer
+ 90   0000              ;;                            OUT: Z:  Indication of emptyness of FIFO
+ 91   0000              ;;                                      Z = no byte to receive
+ 92   0000              ;;                                     NZ = byte is available => reg A=byte
+ 93   0000              ;;                                 CY: Indication of fullness of FIFO
+ 94   0000              ;;                                     NC = buffer ok, no data lost
+ 95   0000              ;;                                      C = overflowed and data may be lost
+ 96   0000              ;;
+ 97   0000              ;; +18 send_byte:           Get send status or send one byte
+ 98   0000              ;;                            INP: CY: NC = get status only
+ 99   0000              ;;                                      C = send one byte
+100   0000              ;;                                 reg A = byte to send (if CY=1)
+101   0000              ;;                            OUT: CY: NC = line free, next byte can be send
+102   0000              ;;                                      C = line occupied, next byte cannot be send
+103   0000              ;;
+104   0000              ;; +20 rece_block:          Receive block of more bytes
+105   0000              ;;                            INP: HL = address to store received data
+106   0000              ;;                                 BC = number of received bytes
+107   0000              ;;                                 DE = timeout (range 0- #FFFF)
+108   0000              ;;                            OUT: HL = address after really read data
+109   0000              ;;                                 BC = number of missing bytes (not received yet) 0 = OK
+110   0000              ;;                                 C= data sent OK, NC= data not sent ok
+111   0000              ;;
+112   0000              ;; +22 send_block:          Send block of more bytes
+113   0000              ;;                            IN: HL = address of data to send
+114   0000              ;;                                BC = length  of data to send
+115   0000              ;;                                DE = must be 0 (reserved for future timeout)
+116   0000              ;;                           OUT: HL = address after really send data
+117   0000              ;;                                BC = number of missing bytes (not send yet) 0 = OK
+118   0000              ;;                                C= data sent OK, NC= data not sent ok
+119   0000              ;;
+120   0000              ;; Services backup all needed registers
+121   0000
+122   0000              ;; Hardware definitions
+123   0000              ;; ~~~~~~~~~~~~~~~~~~~~
+124   0000              ;;
+125   0000              ;; Hardware type: ESP01 integrated in MB03
+126   0000              ;;
+127   0000              ;; Supported speeds as described in MB03+ HW specification:
+128   0000              ;;
+129   0000              ;; Out   Speed
+130   0000              ;; ===   =====
+131   0000              ;;   0 = 115200  (default at reset)
+132   0000              ;;   1 = 57600
+133   0000              ;;   2 = 38400
+134   0000              ;;   3 = 31250
+135   0000              ;;   4 = 19200
+136   0000              ;;   5 = 9600
+137   0000              ;;   6 = 4800
+138   0000              ;;   7 = 2400
+139   0000              ;;   8 = 230400
+140   0000              ;;   9 = 460800
+141   0000              ;;  10 = 576000
+142   0000              ;;  11 = 921600
+143   0000              ;;  12 = 1152000
+144   0000              ;;  13 = 1500000
+145   0000              ;;  14 = 2000000
+146   0000              ;;  15 = 2304000
+147   0000              ;;  16 = 3456000
+148   0000              ;;  17 = 4608000
+149   0000              ;;  18 = 5760000
+150   0000              ;;  19 = 6912000
+151   0000              ;;  20 = 8064000
+152   0000              ;;  21 = 9216000
+153   0000              ;;  22 = 10368000
+154   0000              ;;  23 = 11520000
+155   0000              ;;
+156   0000              ;; Size of the read (RX) FIFO buffer is 2048 bytes.
+157   0000              ;;	The Wi-Fi specification is compatible with the ZX Spectrum Next. More info on websites:
+158   0000              ;;     https://specnext.dev/wiki/ESP8266-01
+159   0000              ;;     https://www.specnext.com/the-next-on-the-network/
+160   0000              ;;     https://www.espressif.com/sites/default/files/documentation/4a-esp8266_at_instruction_set_en.pdf
+161   0000              ;; The ports are h143B = 5179 for RX and h133B = 4923 for TX.
+162   0000              ;; A write to the RX port configures the UART speed:
+163   0000              ;;     0 = 115200 (default at reset); 1 = 57600; 2 = 38400; 3 = 31250; 4 = 19200; 5 = 9600; 6 = 4800; 7 = 2400;
+164   0000              ;;     8 = 230400;  9 = 460800; 10= 576000; 11 = 921600; 12 = 1152000; 13=1_500_000; 14=2_000_000; 15=2_304_000;
+165   0000              ;;     16=3_456_000; 17=4_608_000; 18=5_760_000; 19=6_912_000; 20=8_064_000;  21=9_216_000;
+166   0000              ;;     22=10_368_000; 23=11_520_000
+167   0000              ;; A read from the TX port shows the status of the FIFO buffer and the TX line:
+168   0000              ;;     bit 0: RX status: '0' if the buffer is empty, '1' if there is a data to be collected.
+169   0000              ;;     bit 1: TX status: '1' when the TX still transmitting the last byte or '0' when the TX is idle.
+170   0000              ;;     bit 2: RX status: '1' if the buffer is full,  '0' when the buffer has space to hold.
+171   0000              ;;     bit 3: RX status: '0' if the buffer is almost empty, '1' when the buffer has 256 or more bytes.
+172   0000              ;;     bit 4: RX status: '1' if the buffer is almost full (contains 1024 bytes or more), '0' when the buffer has space to hold.
+173   0000              ;;     zxi_105 - UART speed config (port #723B)- read gets current UART speed written to port h143B
+174   0000
+175   0000
+176   0000              status_data1	=	0	;; RX buffer contains at least 1 received byte
+177   0000              status_busy	=	1
+178   0000              status_full	=	2
+179   0000              status_data256	=	3	;; RX buffer contains at least 256 received bytes
+180   0000              status_free256	=	4
+181   0000
+182   0000              ;		IF seladd=0
+183   0000              ;portselect	equ	#203B
+184   0000              ;ZXi_port6	equ	#263B
+185   0000              ;		ENDIF
+186   0000
+187   0000              ;		IF seladd=1
+188   0000              general_port	equ	#7C3B
+189   0000              element_port	equ	#783B
+190   0000              ;ZXi_port6	equ	#763B
+191   0000              ;		ENDIF
+192   0000
+193   0000              TX_CHKREADY	equ	#133B	;; Write: bytes to send    Read: status bits
+194   0000              RX_SETBAUD	equ	#143B	;; Write: set baud rate    Read: received byted
+195   0000
+196   0000              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+197   0000
+198   0000               IFNDEF	codefile
+199   0000               DEFINE	codefile  WifiBios18_EL.cod
+200   0000              ; DEFINE	snapfile  WifiBios15.sna
+201   0000               ENDIF
+202   0000              		DEVICE	ZXSPECTRUM48
+203   0000              		OUTPUT	WifiBios18_EL.cod
+204   0000              		org	#4000
+205   4000              		disp	#FFFF & (bios_start-this)
+206   FE3C
+207   FE3C              ;here starts bios working code
+208   FE3C
+209   FE3C              bios_start
+210   FE3C
+211   FE3C 18 28        get_vers_inst	jr	install_getver		;adr+00
+212   FE3E C9           		ret
+212   FE3F C9            ret				;adr+02 reserved
+213   FE40 18 4E        wifi_on		jr	turnon_wifi		;adr+04
+214   FE42 18 4B        wifi_off	jr	turnof_wifi		;adr+06
+215   FE44 18 11        set_baud	jr	jmp_set_baud		;adr+08
+216   FE46 18 0C        get_baud	jr	jmp_get_baud		;adr+10
+217   FE48 18 49        clear_rece_buff	jr	clear_loop		;adr+12
+218   FE4A C9           clear_send_buff	ret
+218   FE4B C9            ret				;adr+14 not used here
+219   FE4C 18 0C        rece_byte	jr	jmp_rec_byt		;adr+16
+220   FE4E 18 0D        send_byte	jr	jmp_snd_byt		;adr+18
+221   FE50 18 0E        rece_block	jr	jmp_rec_blk		;adr+20
+222   FE52 18 0F        send_block	jr	jmp_snd_blk		;adr+22
+223   FE54
+224   FE54              end_of_calls
+225   FE54              num_of_calls	=	(end_of_calls-get_vers_inst) >> 1
+226   FE54
+227   FE54 C3 C0 FE     jmp_get_baud	jp	get_baud_rate
+228   FE57 C3 A1 FE     jmp_set_baud	jp	set_baud_rate
+229   FE5A C3 F0 FE     jmp_rec_byt	jp	receive_byte		;adr+16
+230   FE5D C3 06 FF     jmp_snd_byt	jp	sending_byte		;adr+18
+231   FE60 C3 1D FF     jmp_rec_blk	jp	receive_block		;adr+20
+232   FE63 C3 5B FF     jmp_snd_blk	jp	sending_block		;adr+22
+233   FE66
+234   FE66              ;; Install and get version
+235   FE66
+236   FE66 18 37        install_getver	jr	reloc1
+237   FE68
+238   FE68              ;		ld	bc,portselect
+239   FE68              ;		ld	a,#FF
+240   FE68              ;		out	(c),a
+241   FE68              ;		ld	b,high ZXi_port6
+242   FE68
+243   FE68
+244   FE68 21 F3 FF     add_biosid	ld	hl,reloc		;read core version to "reloc" address
+245   FE6B E5           		push	hl
+246   FE6C 01 3B 78     		ld	bc,element_port
+247   FE6F 1E FE        		ld	e,#FE
+248   FE71
+249   FE71 ED 59        biosid_loop	out	(c),e
+250   FE73 04           		inc	b
+251   FE74 ED 78        		in	a,(c)
+252   FE76 77           		ld	(hl),a
+253   FE77 23           		inc	hl
+254   FE78 05           		dec	b
+255   FE79 1D           		dec	e
+256   FE7A 7B           		ld	a,e
+257   FE7B FE F8        		cp	#F8
+258   FE7D              ;		ld	a,b
+259   FE7D              ;		cp	high portselect
+260   FE7D 20 F2        		jr	nz,biosid_loop
+261   FE7F
+262   FE7F              ;		pop	hl
+263   FE7F              ;		push	hl
+264   FE7F              ;		ld	d,7			;now set speed and retry answer from AT command
+265   FE7F              ;		ld	a,(hl)			;HL=core version found
+266   FE7F              ;		cp	20
+267   FE7F              ;		jr	c,got_max_speed		;found core <2019xxxxx, max speed=7= 115_200 Bd
+268   FE7F              ;		jr	z,sc1
+269   FE7F              ;		ld	d,23
+270   FE7F              ;		jr	nc,got_max_speed	;NC=found core>202006xx, max speed=23= 11_500_200 Bd
+271   FE7F              ;sc1		inc	hl
+272   FE7F              ;		ld	a,(hl)
+273   FE7F              ;		cp	5
+274   FE7F              ;		jr	c,got_max_speed		;found core 202004xx, max speed=7= 115_200 Bd
+275   FE7F              ;		ld	d,12
+276   FE7F              ;		jr	z,got_max_speed		;Z=found core 202005xx, max speed=12= 1_152_000 Bd
+277   FE7F              ;		ld	d,23			;found core >202006xx, max speed=23= 11_500_200 Bd
+278   FE7F              ;got_max_speed	ld	a,d			;d=7 or 12 or 23
+279   FE7F 3E 17        		ld	a,23			;with EL max speed is always 23
+280   FE81 32 A9 FE     set_max_idx	ld	(max_index+1),a
+281   FE84
+282   FE84 D1           biosid_end	pop	de
+283   FE85 21 E3 FF     		ld	hl,bios_id
+284   FE88 DD 2E 0C     		ld	lx,num_of_calls
+285   FE8B 01 08 01     		ld	bc,vers
+286   FE8E C9           		ret
+287   FE8F
+288   FE8F              ;; WiFi module turn OFF
+289   FE8F
+290   FE8F C9           turnof_wifi	ret
+291   FE90              ;		call	turn_sub
+292   FE90              ;		and	%11111110
+293   FE90              ;		out	(c),a
+294   FE90              ;		ret
+295   FE90
+296   FE90              ;turn_sub	ld	bc,portselect
+297   FE90              ;		ld	a,5
+298   FE90              ;		out	(c),a
+299   FE90              ;		inc	b
+300   FE90              ;		in	a,(c)
+301   FE90              ;		ret
+302   FE90
+303   FE90              ;; WiFi module turn ON- for EL, set NZ only, to indicate ON
+304   FE90
+305   FE90 AF           turnon_wifi	xor	a
+306   FE91 3C           		inc	a
+307   FE92 C9           		ret			;set NZ only
+308   FE93              ;		call	turn_sub
+309   FE93              ;		bit	0,a
+310   FE93              ;		ret	nc		;OUT=Z/NZ
+311   FE93              ;		ld	a,1
+312   FE93              ;		or	a
+313   FE93              ;		out	(c),a		;; turn wifi ON
+314   FE93              ;		ret			;; NZ= wifi is on
+315   FE93
+316   FE93
+317   FE93              ;; Clear receive buffer
+318   FE93
+319   FE93 3E 13        clear_loop	ld	a,high TX_CHKREADY
+320   FE95 DB 3B        		in	a,(low TX_CHKREADY)
+321   FE97 0F           		rrca
+322   FE98 D0           		ret	nc
+323   FE99 3E 14        		ld	a,high RX_SETBAUD
+324   FE9B DB 3B        		in	a,(low RX_SETBAUD)
+325   FE9D 18 F4        		jr	clear_loop
+326   FE9F
+327   FE9F 18 4D        reloc1		jr	reloc2
+328   FEA1
+329   FEA1              ;; Set/Get baud rate
+330   FEA1
+331   FEA1 1E 00        set_baud_rate	ld	e,#00		;; We have 24 speeds on ESP01 in MB03 so far
+332   FEA3 43           		ld	b,e		;; in case of error speed 0 will be returned
+333   FEA4 4B           		ld	c,e
+334   FEA5 CB 1A        		rr	d		;; Bit 7,d: 0=Info / 1=Set
+335   FEA7 6F           		ld	l,a		;; L = requested speed index
+336   FEA8 3E 55        max_index	ld	a,#55		;; A = max supported speed index (7,12,23)
+337   FEAA BD           		cp	l
+338   FEAB D8           		ret	c		;; Return with CY=1 if speed index overflows max speed
+339   FEAC
+340   FEAC 01 82 FF     add_spdtab1	ld	bc,spdtab+3
+341   FEAF 26 00        		ld	h,#00
+342   FEB1 29           		add	hl,hl
+343   FEB2 29           		add	hl,hl
+344   FEB3 09           		add	hl,bc		; CY=0
+345   FEB4 7E           		ld	a,(hl)		; A = HW byte for speed
+346   FEB5
+347   FEB5 CB 7A        		bit	7,d
+348   FEB7 28 2E        		jr	z,read_item
+349   FEB9
+350   FEB9 01 3B 14     set_speed	ld	bc,RX_SETBAUD	;now, set speed into hw
+351   FEBC ED 79        		out	(c),a
+352   FEBE
+353   FEBE 18 27        		jr	read_item
+354   FEC0
+355   FEC0              ;; Read speed HW code and search relevant speed in speed table
+356   FEC0              ;; If code not found, return BC:E = 0
+357   FEC0
+358   FEC0 11 00 FF     get_baud_rate	ld	de,#FF00
+359   FEC3 43           		ld	b,e
+360   FEC4 4B           		ld	c,e
+361   FEC5 3A A9 FE     get_max_idx	ld	a,(max_index+1)	;A= max speed allowed by MB03+ FW (7, 12 or 23)
+362   FEC8 D6 16        		sub	22
+363   FECA D8           		ret	c		;Return with CY=1 and BC:E=0 if reading speed if not supported
+364   FECB
+365   FECB              ;		ld	bc,portselect	;read out currently set speed
+366   FECB 01 3B 7C     		ld	bc,general_port
+367   FECE 3E 30        		ld	a,#30
+368   FED0 ED 79        		out	(c),a
+369   FED2 04           		inc	b
+370   FED3 ED 78        		in	a,(c)
+371   FED5
+372   FED5 21 7E FF     add_spdtab2	ld	hl,spdtab-1	;find out bios index speed
+373   FED8 23           search_loop	inc	hl
+374   FED9 23           		inc	hl
+375   FEDA 23           		inc	hl
+376   FEDB 23           		inc	hl
+377   FEDC 14           		inc	d
+378   FEDD BE           		cp	(hl)
+379   FEDE 28 06        		jr	z,spd_found	;If code found, CY=0 & Z=1
+380   FEE0 CB 7E        		bit	7,(hl)
+381   FEE2 28 F4        		jr	z,search_loop
+382   FEE4 56           		ld	d,(hl)		;Invalid index of speed D=#FF if BC:E=0
+383   FEE5 37           		scf			;CY=1, Z=0
+384   FEE6
+385   FEE6 7A           spd_found	ld	a,d		;; A = found index of speed
+386   FEE7 2B           read_item	dec	hl		;; HL = found item in baud speed table
+387   FEE8 5E           		ld	e,(hl)
+388   FEE9 2B           		dec	hl
+389   FEEA 46           		ld	b,(hl)
+390   FEEB 2B           		dec	hl		;; Output:
+391   FEEC 4E           		ld	c,(hl)		;;  BC:E = Baud rate (0 if speed not supported)
+392   FEED C9           		ret			;;  D = index of speed in BC:E (#FF = not valid)
+393   FEEE
+394   FEEE 18 69        reloc2		jr	reloc3
+395   FEF0
+396   FEF0              ;; Read one byte from receive buffer
+397   FEF0
+398   FEF0 C5           receive_byte	push	bc
+399   FEF1 D5           		push	de
+400   FEF2 01 3B 13     		ld	bc,TX_CHKREADY
+401   FEF5 ED 78        		in	a,(c)
+402   FEF7 CB 47        		bit	status_data1,a		;Z = no byte to receive, NZ = byte to receive
+403   FEF9 30 06        		jr	nc,rece_stat		;NC = read status only, jump to carry setting
+404   FEFB 28 04        		jr	z,rece_stat		;Z = no byte to receive
+405   FEFD
+406   FEFD 04           		inc	b			;B = high RX_SETBAUD
+407   FEFE ED 58        		in	e,(c)			;receive byte
+408   FF00 04           		inc	b			;Set NZ as flag 'received byte valid'
+409   FF01
+410   FF01              rece_stat	DUP	status_full+1
+411   FF01 0F          >		rrca				;Set CY according to fullness of buffer. Zero is not changed.
+411   FF02 0F          >		rrca				;Set CY according to fullness of buffer. Zero is not changed.
+411   FF03 0F          >		rrca				;Set CY according to fullness of buffer. Zero is not changed.
+412   FF04              		EDUP
+413   FF04 18 13        		jr	ld_pop_ret		;received byte to reg. A (even if C, this is ok for some apps)
+414   FF06
+415   FF06
+416   FF06
+417   FF06
+418   FF06              ;; Transmit one byte
+419   FF06
+420   FF06 C5           sending_byte	push	bc
+421   FF07 D5           		push	de
+422   FF08 5F           		ld	e,a		;E= byte to send
+423   FF09 01 3B 13     		ld	bc,TX_CHKREADY
+424   FF0C ED 78        		in	a,(c)		;does not change carry
+425   FF0E 30 07        		jr	nc,send_status
+426   FF10 1F           		rra			;send also byte
+427   FF11 1F           		rra
+428   FF12 38 05        		jr	c,ld_pop_ret	;ZF=0 CY=1 line occupied, byte was not sent
+429   FF14 ED 59        		out	(c),e		;NC= line free, byte was sent
+430   FF16 11           		db	#11		;#11 = ld de,<16-bit-number> = jump over "and <8bit)"
+431   FF17
+432   FF17 E6 02        send_status	and	#01 << status_busy	;CY=0, Z = line free for transmit, NZ = line occupied
+433   FF19
+434   FF19 7B           ld_pop_ret	ld	a,e
+435   FF1A D1           		pop	de
+436   FF1B C1           		pop	bc
+437   FF1C C9           		ret
+438   FF1D
+439   FF1D
+440   FF1D              ;; Receive block of bytes
+441   FF1D              ;;
+442   FF1D              ;; Input:
+443   FF1D              ;;   HL = address to store data
+444   FF1D              ;;   DE = timeout (0- #FFFF)
+445   FF1D              ;;   BC = number of requested bytes
+446   FF1D              ;;   OUT= C=data received ok (BC=0), NC= data received not OK (BC=non zero)
+447   FF1D
+448   FF1D              ;receive_block	ld	a,#7F		;; Test SPACE key (as break)		;; 7
+449   FF1D              ;		in	a,(#FE)							;; 11
+450   FF1D              ;		and	#01							;; 7= 25
+451   FF1D              ;		ret	z		;; Status: A=0 ... BREAK pressed by user;; 11/5
+452   FF1D
+453   FF1D 7B           receive_block	ld	a,e							;; 4
+454   FF1E B2           		or	d							;; 4
+455   FF1F 1B           		dec	de							;; 6
+456   FF20 C8           		ret	z	;; timeout elapsed=NC=data not received correct	;; 11/5
+457   FF21
+458   FF21 3E 13        		ld	a,high TX_CHKREADY	;; Get status info
+459   FF23 DB 3B        		in	a,(low TX_CHKREADY)
+460   FF25 CB 5F        		bit	status_data256,a
+461   FF27 20 0F        		jr	nz,rece256data		;; 256+ bytes of data received ?
+462   FF29 CB 47        		bit	status_data1,a		;; (enough to use "rrca" here)
+463   FF2B 28 F0        		jr	z,receive_block		;; At least one byte received ?
+464   FF2D
+465   FF2D
+466   FF2D 3E 14        rece1byte	ld	a,high RX_SETBAUD	;; Receive 1 byte
+467   FF2F DB 3B        		in	a,(low RX_SETBAUD)
+468   FF31 77           		ld	(hl),a
+469   FF32 ED A1        		cpi
+470   FF34 37           		scf			;; set C to signal all data received ok
+471   FF35 E0           		ret	po
+472   FF36 18 E5        		jr	receive_block
+473   FF38
+474   FF38 AF           rece256data	xor	a		;; Receive 256 bytes (optimized for speed)
+475   FF39 A8           		xor	b
+476   FF3A 28 F1        		jr	z,rece1byte	;; (only if application wants 256+ bytes)
+477   FF3C C5           		push	bc
+478   FF3D 01 3B 14     		ld	bc,RX_SETBAUD
+479   FF40 3E 40        		ld	a,#40
+480   FF42              rece256loop	DUP 4			;; Loop for receive fixed 4*64 bytes
+481   FF42 ED A2       >		  ini			;; Takes 96 T / 4 bytes => max.speed 140 kB/s
+482   FF44 04          >		  inc	b		;; INC B is needed to keep 16bit port address unchanged
+481   FF45 ED A2       >		  ini			;; Takes 96 T / 4 bytes => max.speed 140 kB/s
+482   FF47 04          >		  inc	b		;; INC B is needed to keep 16bit port address unchanged
+481   FF48 ED A2       >		  ini			;; Takes 96 T / 4 bytes => max.speed 140 kB/s
+482   FF4A 04          >		  inc	b		;; INC B is needed to keep 16bit port address unchanged
+481   FF4B ED A2       >		  ini			;; Takes 96 T / 4 bytes => max.speed 140 kB/s
+482   FF4D 04          >		  inc	b		;; INC B is needed to keep 16bit port address unchanged
+483   FF4E              		EDUP
+484   FF4E 3D           		dec	a
+485   FF4F 20 F1        		jr	nz,rece256loop
+486   FF51 C1           		pop	bc
+487   FF52 05           		dec	b		;; Decrement length by 256 in one time
+488   FF53 78           		ld	a,b
+489   FF54 B1           		or	c		;; If still not zero, continue in receiving
+490   FF55 20 C6        		jr	nz,receive_block
+491   FF57 37           		scf			;; set C to signal all data received ok
+492   FF58 C9           		ret
+493   FF59
+494   FF59 18 22        reloc3		jr	reloc4
+495   FF5B
+496   FF5B              ;; Send block of bytes
+497   FF5B              ;;
+498   FF5B              ;; Input:
+499   FF5B              ;;   HL = address of data to send
+500   FF5B              ;;   DE = timeout (not supported yet)
+501   FF5B              ;;   BC = length of data to send
+502   FF5B              ;;   OUT= C=data sent ok (BC=0), NC= data sent not OK (BC=non zero)
+503   FF5B D5           sending_block	push	de		;; DE = timeout
+504   FF5C D9           		exx
+505   FF5D D1           		pop	de
+506   FF5E D9           		exx
+507   FF5F 59           		ld	e,c		;; DE->BC = data length
+508   FF60 50           		ld	d,b
+509   FF61 01 3B 13     		ld	bc,TX_CHKREADY	;; BC = port address
+510   FF64
+511   FF64 D9           send_loop	exx								;; 4
+512   FF65 1B           		dec	de		;; timeout in DE??			;; 6
+513   FF66 7A           		ld	a,d							;; 4
+514   FF67 B3           		or	e							;; 4
+515   FF68 D9           		exx								;; 4= 22
+516   FF69 28 0F        		jr	z,send_end	;; NC=	data not sent ok		;; 12/7
+517   FF6B
+518   FF6B              ;		ld	a,#7F		;; Test SPACE key (as break)		;; 7
+519   FF6B              ;		in	a,(#FE)							;; 11
+520   FF6B              ;		and	#01							;; 7= 25
+521   FF6B              ;		jr	z,send_end	;; Status: A=0 ... BREAK pressed by user;; 12/7
+522   FF6B
+523   FF6B ED 78        		in	a,(c)		;; Get status info			;; 12
+524   FF6D E6 02        		and	#01 << status_busy					;; 7
+525   FF6F 20 F3        		jr	nz,send_loop						;; 12/7
+526   FF71
+527   FF71
+528   FF71 04           		inc	b							;; 4
+529   FF72 ED A3        		outi								;; 16
+530   FF74 1B           		dec	de							;; 6
+531   FF75 7A           		ld	a,d							;; 4
+532   FF76 B3           		or	e							;; 4
+533   FF77 20 EB        		jr	nz,send_loop						;; 12/7
+534   FF79
+535   FF79 37           		scf			;; C= data sent ok
+536   FF7A 42           send_end	ld	b,d		;; Restore BC to remaining length
+537   FF7B 4B           		ld	c,e
+538   FF7C C9           		ret
+539   FF7D
+540   FF7D 18 74        reloc4		jr	reloc
+541   FF7F
+542   FF7F              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+543   FF7F
+544   FF7F              speed		MACRO	baud , exponent , data_out
+545   FF7F ~            		dw	baud
+546   FF7F ~            		db	exponent
+547   FF7F ~            		db	data_out
+548   FF7F              		ENDM
+549   FF7F
+550   FF7F              		;;	Mantisa  Exp	Byte for OUT
+551   FF7F              		;;	=======  ===	============
+552   FF7F              spdtab		speed	24	, 2 ,	7
+552   FF7F 18 00       >		dw	24
+552   FF81 02          >		db	2
+552   FF82 07          >		db	7
+553   FF83              		speed	48	, 2 ,	6
+553   FF83 30 00       >		dw	48
+553   FF85 02          >		db	2
+553   FF86 06          >		db	6
+554   FF87              		speed	96	, 2 ,	5
+554   FF87 60 00       >		dw	96
+554   FF89 02          >		db	2
+554   FF8A 05          >		db	5
+555   FF8B              		speed	192	, 2 ,	4
+555   FF8B C0 00       >		dw	192
+555   FF8D 02          >		db	2
+555   FF8E 04          >		db	4
+556   FF8F              		speed	3125	, 1 ,	3
+556   FF8F 35 0C       >		dw	3125
+556   FF91 01          >		db	1
+556   FF92 03          >		db	3
+557   FF93              		speed	384	, 2 ,	2
+557   FF93 80 01       >		dw	384
+557   FF95 02          >		db	2
+557   FF96 02          >		db	2
+558   FF97              		speed	576	, 2 ,	1
+558   FF97 40 02       >		dw	576
+558   FF99 02          >		db	2
+558   FF9A 01          >		db	1
+559   FF9B              		speed	1152	, 2 ,	0
+559   FF9B 80 04       >		dw	1152
+559   FF9D 02          >		db	2
+559   FF9E 00          >		db	0
+560   FF9F              		speed	2304	, 2 ,	8
+560   FF9F 00 09       >		dw	2304
+560   FFA1 02          >		db	2
+560   FFA2 08          >		db	8
+561   FFA3              		speed	4608	, 2 ,	9
+561   FFA3 00 12       >		dw	4608
+561   FFA5 02          >		db	2
+561   FFA6 09          >		db	9
+562   FFA7              		speed	576	, 3 ,	10
+562   FFA7 40 02       >		dw	576
+562   FFA9 03          >		db	3
+562   FFAA 0A          >		db	10
+563   FFAB              		speed	9216	, 2 ,	11
+563   FFAB 00 24       >		dw	9216
+563   FFAD 02          >		db	2
+563   FFAE 0B          >		db	11
+564   FFAF              		speed	1152	, 3 ,	12
+564   FFAF 80 04       >		dw	1152
+564   FFB1 03          >		db	3
+564   FFB2 0C          >		db	12
+565   FFB3              		speed	15	, 5 ,	13	;new speeds
+565   FFB3 0F 00       >		dw	15
+565   FFB5 05          >		db	5
+565   FFB6 0D          >		db	13
+566   FFB7              		speed	2	, 6 ,	14
+566   FFB7 02 00       >		dw	2
+566   FFB9 06          >		db	6
+566   FFBA 0E          >		db	14
+567   FFBB              		speed	2304	, 3 ,	15
+567   FFBB 00 09       >		dw	2304
+567   FFBD 03          >		db	3
+567   FFBE 0F          >		db	15
+568   FFBF              		speed	3456	, 3 ,	16
+568   FFBF 80 0D       >		dw	3456
+568   FFC1 03          >		db	3
+568   FFC2 10          >		db	16
+569   FFC3              		speed	4608	, 3 ,	17
+569   FFC3 00 12       >		dw	4608
+569   FFC5 03          >		db	3
+569   FFC6 11          >		db	17
+570   FFC7              		speed	576	, 4 ,	18
+570   FFC7 40 02       >		dw	576
+570   FFC9 04          >		db	4
+570   FFCA 12          >		db	18
+571   FFCB              		speed	6912	, 3 ,	19
+571   FFCB 00 1B       >		dw	6912
+571   FFCD 03          >		db	3
+571   FFCE 13          >		db	19
+572   FFCF              		speed	8064	, 3 ,	20
+572   FFCF 80 1F       >		dw	8064
+572   FFD1 03          >		db	3
+572   FFD2 14          >		db	20
+573   FFD3              		speed	9216	, 3 ,	21
+573   FFD3 00 24       >		dw	9216
+573   FFD5 03          >		db	3
+573   FFD6 15          >		db	21
+574   FFD7              		speed	10368	, 3 ,	22
+574   FFD7 80 28       >		dw	10368
+574   FFD9 03          >		db	3
+574   FFDA 16          >		db	22
+575   FFDB              		speed	1152	, 4 ,	23
+575   FFDB 80 04       >		dw	1152
+575   FFDD 04          >		db	4
+575   FFDE 17          >		db	23
+576   FFDF              		speed	0	, 0 ,	#FF	;; End mark item with not valid speed = 0
+576   FFDF 00 00       >		dw	0
+576   FFE1 00          >		db	0
+576   FFE2 FF          >		db	#FF
+577   FFE3
+578   FFE3              		;; Speed = Mantisa * 10 ^ Exp
+579   FFE3
+580   FFE3 65 4C 65 4D  bios_id		db	'eLeMeNtZX-ESP01',0		;; Bios version in text
+580   FFE7 65 4E 74 5A
+580   FFEB 58 2D 45 53
+580   FFEF 50 30 31 00
+581   FFF3              bios_len	=	$-bios_start
+582   FFF3
+583   FFF3              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+584   FFF3
+585   FFF3              ;;;;;;;;;;;;;;;;;;;;;;;;
+586   FFF3              ;; Relocation routine ;;
+587   FFF3              ;;;;;;;;;;;;;;;;;;;;;;;;
+588   FFF3
+589   FFF3              ;; After first call, routine is no used anymore and its memory is free for user
+590   FFF3
+591   FFF3              work	equ	#5CAE		;; Last bytes of MEMBOT (nobody uses this...)
+592   FFF3
+593   FFF3 2A AE 5C     reloc	ld	hl,(work)	;; Find out this code's address
+594   FFF6 E5           	push	hl
+595   FFF7 21 E1 E9     	ld	hl,#E9E1	;; E1 = pop hl ; E9 = jp (hl)
+596   FFFA 22 AE 5C     	ld	(work),hl
+597   FFFD CD AE 5C     	call	work
+598   0000              this
+599   0000              	ENT	;; Eliminate warning "RAM limit exceeded"
+600   41C4              	org	#4000+this-bios_start
+601   41C4              	disp	#0000
+602   0000
+603   0000 4D           	ld	c,l
+604   0001 44           	ld	b,h		;; BC = this
+605   0002 E1           	pop	hl
+606   0003 22 AE 5C     	ld	(work),hl
+607   0006 21 3B 00     	ld	hl,reltab-this+1
+608   0009 09           	add	hl,bc		;; HL = reltab
+609   000A
+610   000A 56           reloop	ld	d,(hl)
+611   000B 2B           	dec	hl
+612   000C 5E           	ld	e,(hl)
+613   000D 2B           	dec	hl
+614   000E E5           	push	hl
+615   000F EB           	ex	de,hl
+616   0010 09           	add	hl,bc
+617   0011 5E           	ld	e,(hl)
+618   0012 23           	inc	hl
+619   0013 56           	ld	d,(hl)
+620   0014 EB           	ex	de,hl
+621   0015 09           	add	hl,bc
+622   0016 EB           	ex	de,hl
+623   0017 72           	ld	(hl),d
+624   0018 2B           	dec	hl
+625   0019 73           	ld	(hl),e
+626   001A E1           	pop	hl
+627   001B CB 66        	bit	4,(hl)
+628   001D 20 EB        	jr	nz,reloop
+629   001F
+630   001F 21 66 FE     	ld	hl,install_getver
+631   0022 09           	add	hl,bc
+632   0023 36 3E        	ld	(hl),#3E
+633   0025 E9           	jp	(hl)
+634   0026
+635   0026 58 FE        	dw	jmp_set_baud + 1	;; List of all absolute addresses
+636   0028 55 FE        	dw	jmp_get_baud + 1
+637   002A 5B FE        	dw	jmp_rec_byt + 1
+638   002C 5E FE        	dw	jmp_snd_byt + 1
+639   002E 61 FE        	dw	jmp_rec_blk + 1
+640   0030 64 FE        	dw	jmp_snd_blk + 1
+641   0032              ;	dw	turnon_wifi + 1
+642   0032              ;	dw	turnof_wifi + 1
+643   0032 69 FE        	dw	add_biosid + 1
+644   0034 82 FE        	dw	set_max_idx + 1
+645   0036 C6 FE        	dw	get_max_idx + 1
+646   0038 AD FE        	dw	add_spdtab1 + 1
+647   003A D6 FE        reltab	dw	add_spdtab2 + 1
+648   003C
+649   003C              instend
+650   003C              ;instlen	=	instend - bios_start
+651   003C
+652   003C              	ENT
+653   4200              	OUTEND
+654   4200
+655   4200              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+656   4200
+657   4200              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+658   4200              ;; Testing code (not part of wifibios) ;;
+659   4200              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+660   4200
+661   4200              	org	#9000	;; Test routine
+662   9000 CD 00 40     start	call	#4000	;; Install bios
+663   9003 CD 00 40     	call	#4000	;; Get version
+664   9006 AF           	xor	a
+665   9007 3C           	inc	a	;; For index = 1
+666   9008
+667   9008 3E 0C        	ld	a,12	;; For index = 12
+668   900A 37           	scf
+669   900B CD 08 40     	call	#4008	;; Get actual baud rate
+670   900E 3E 0E        	ld	a,#0E
+671   9010 D3 FE        	out	(#fe),a	;; Border 6 after all OK
+672   9012 18 FE        stop	jr	stop	;; Stop test
+673   9014
+674   9014              ;        SAVESNA snapfile , start
+675   9014
+# file closed: WifiBios18.a80

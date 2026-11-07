@@ -1,0 +1,1 @@
+c:/users/mstava/zx/sjasmplus115/sjasmplus --lst=WifiBios19_EL.lst WifiBios19_EL.a80

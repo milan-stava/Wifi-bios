@@ -1,0 +1,21 @@
+Wifi bios for MB03+ and eLeMeNt ZX
+
+
+version 2.0, released: 03.01.2026
+download: {ver 1.5}
+{ver 1.6}
+{ver 1.8}
+{ver 1.9}
+{ver 2.0}
+
+
+News in 2.0:
+ver 2.0 - 03.01.2026
+- main change: bios now exists in 1 version, for eLeMeNt ZX and MB03+ Wifi modules
+- fixed turnon wifi, removed device select. Only 1 bit set when turning wifi on.
+- "get version instal" returns in E if mb was detected E= NZ=connected, E= 0=not connected, meaning el wifi is in usage
+- gives back speed 23 always
+- turnon_wifi: changes just one bit, not a whole byte
+- turnoff_wifi: new-OUT gives Z/NZ (Z= wifi cannot be turned off, NZ= wifi can be turned off)
+
+

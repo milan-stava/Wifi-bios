@@ -1,7 +1,4 @@
-# Generated listings, symbols and local logs (binaries are intentionally tracked)
-*.lst
-*.sym
-*.log
+# Project files, archives, listings and binaries are intentionally tracked.
 Thumbs.db
 .DS_Store
 .vs/
